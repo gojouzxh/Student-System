@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Domain Unit Tests — Quiz &amp; Study Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/styles.css" />
+  <link rel="stylesheet" href="../css/week2.css" />
+  <style>
+    body { padding: 36px 44px; max-width: 860px; }
+    h1   { font-family: var(--font-serif); }
+    .test-result { padding: 8px 14px; border-radius: 4px; font-size: 0.9rem;
+                   display: flex; gap: 10px; margin-bottom: 6px; align-items: flex-start; }
+    .test-result--pass { background: #d4edda; color: #1a5e2a; }
+    .test-result--fail { background: #f8d7da; color: #7a1a1a; }
+    .test-result__icon { font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+    .test-result__error { font-size: 0.82rem; opacity: 0.85; margin-top: 3px; }
+    .summary { font-family: var(--font-serif); font-size: 1.3rem; margin: 20px 0 10px; }
+    .summary--all-pass { color: #1a5e2a; }
+    .summary--some-fail { color: #7a1a1a; }
+    .group-header { font-weight: 600; color: var(--muted); font-size: 0.82rem;
+                    text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+  </style>
+</head>
+<body>
+  <h1>Domain Unit Tests</h1>
+  <p class="muted">Testing core domain logic: scoring, percentages, duration, goal progress, validations.</p>
+  <div id="results"></div>
+
+  <script type="module">
+    import { Quiz } from "../js/models/Quiz.js";
+    import { Question } from "../js/models/Question.js";
+    import { Choice } from "../js/models/Choice.js";
+    import { StudySession } from "../js/models/StudySession.js";
+    import { StudyGoal } from "../js/models/StudyGoal.js";
+    import { QuizAttempt } from "../js/models/QuizAttempt.js";
+
+    // ---- Minimal test harness ----
+    const results = [];
+    let currentGroup = "";
+
+    function group(name) { currentGroup = name; }
+
+    function test(name, fn) {
+      try {
+        fn();
+        results.push({ ok: true, name, group: currentGroup });
+      } catch (err) {
+        results.push({ ok: false, name, group: currentGroup, error: err.message });
+      }
+    }
+
+    function assert(condition, msg = "Assertion failed") {
+      if (!condition) throw new Error(msg);
+    }
+    function assertEqual(a, b, msg) {
+      if (a !== b) throw new Error(msg ?? `Expected ${JSON.stringify(a)} === ${JSON.stringify(b)}`);
+    }
+
+    // Helper to build a simple Quiz
+    function makeQuiz(questionDefs, opts = {}) {
+      const questions = questionDefs.map((qd, qi) => ({
+        id: `q${qi}`, topicId: "top1",
+        prompt: qd.prompt ?? `Question ${qi}`,
+        choices: qd.choices.map((text, ci) => ({ id: String.fromCharCode(97 + ci), text })),
+        correctChoiceId: String.fromCharCode(97 + qd.correctIdx),
+        explanation: "",
+      }));
+      return new Quiz({ id: "quiz1", subjectId: "s1", topicId: "top1",
+        title: "Test", difficulty: opts.difficulty ?? "easy",
+        timeLimitSeconds: opts.timeLimitSeconds ?? 0, questions });
+    }
+
+    // ============================================================
+    // Quiz scoring
+    // ============================================================
+    group("Quiz Scoring");
+
+    test("Perfect score returns 100%", () => {
+      const quiz = makeQuiz([
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 1 },
+      ]);
+      const answers = new Map([["q0", "a"], ["q1", "b"]]);
+      const r = quiz.grade(answers);
+      assertEqual(r.score, 2); assertEqual(r.percentage, 100);
+    });
+
+    test("Zero correct returns 0%", () => {
+      const quiz = makeQuiz([{ choices: ["A", "B", "C", "D"], correctIdx: 0 }]);
+      const r = quiz.grade(new Map([["q0", "d"]]));
+      assertEqual(r.score, 0); assertEqual(r.percentage, 0);
+    });
+
+    test("2/3 correct = 67%", () => {
+      const quiz = makeQuiz([
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 1 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 2 },
+      ]);
+      const answers = new Map([["q0", "a"], ["q1", "b"], ["q2", "d"]]); // q2 wrong
+      const r = quiz.grade(answers);
+      assertEqual(r.score, 2); assertEqual(r.percentage, 67);
+    });
+
+    test("Unanswered question counts as wrong", () => {
+      const quiz = makeQuiz([{ choices: ["A", "B", "C", "D"], correctIdx: 0 }]);
+      const r = quiz.grade(new Map());
+      assertEqual(r.score, 0);
+    });
+
+    test("Empty quiz returns 0%", () => {
+      const quiz = new Quiz({ id: "q", subjectId: "s", topicId: "t", title: "Empty",
+        difficulty: "easy", timeLimitSeconds: 0, questions: [] });
+      const r = quiz.grade(new Map());
+      assertEqual(r.percentage, 0); assertEqual(r.total, 0);
+    });
+
+    test("timeTakenSeconds is returned from grade()", () => {
+      const quiz = makeQuiz([{ choices: ["A", "B", "C", "D"], correctIdx: 0 }]);
+      const r = quiz.grade(new Map([["q0", "a"]]), 120);
+      assertEqual(r.timeTakenSeconds, 120);
+    });
+
+    // ============================================================
+    // Percentage calculation
+    // ============================================================
+    group("Percentage Calculation");
+
+    test("1/4 = 25%", () => {
+      const quiz = makeQuiz([
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+      ]);
+      const answers = new Map([["q0", "a"], ["q1", "d"], ["q2", "d"], ["q3", "d"]]);
+      assertEqual(quiz.grade(answers).percentage, 25);
+    });
+
+    test("3/4 = 75%", () => {
+      const quiz = makeQuiz([
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+        { choices: ["A", "B", "C", "D"], correctIdx: 0 },
+      ]);
+      const answers = new Map([["q0", "a"], ["q1", "a"], ["q2", "a"], ["q3", "d"]]);
+      assertEqual(quiz.grade(answers).percentage, 75);
+    });
+
+    // ============================================================
+    // StudySession duration
+    // ============================================================
+    group("Study Duration Calculation");
+
+    test("Calculates 30 min from start/end times", () => {
+      const s = new StudySession({
+        id: "s1", studentId: "u1", subjectId: "sub1",
+        startTime: "2026-09-28T09:00:00",
+        endTime:   "2026-09-28T09:30:00",
+      });
+      assertEqual(s.minutes, 30);
+    });
+
+    test("Calculates 90 min from start/end times", () => {
+      const s = new StudySession({
+        id: "s1", studentId: "u1", subjectId: "sub1",
+        startTime: "2026-09-28T10:00:00",
+        endTime:   "2026-09-28T11:30:00",
+      });
+      assertEqual(s.minutes, 90);
+    });
+
+    test("Uses explicit minutes when no start/end", () => {
+      const s = new StudySession({ id: "s2", studentId: "u1", subjectId: "sub1", minutes: 45 });
+      assertEqual(s.minutes, 45);
+    });
+
+    test("Throws when endTime <= startTime", () => {
+      let threw = false;
+      try {
+        new StudySession({ id: "s3", studentId: "u1", subjectId: "sub1",
+          startTime: "2026-09-28T10:00:00", endTime: "2026-09-28T09:00:00" });
+      } catch { threw = true; }
+      assert(threw, "Should throw for end <= start");
+    });
+
+    test("Throws when minutes = 0", () => {
+      let threw = false;
+      try { new StudySession({ id: "s4", studentId: "u1", subjectId: "sub1", minutes: 0 }); }
+      catch { threw = true; }
+      assert(threw, "Should throw for 0 minutes");
+    });
+
+    test("Throws when no time data provided", () => {
+      let threw = false;
+      try { new StudySession({ id: "s5", studentId: "u1", subjectId: "sub1" }); }
+      catch { threw = true; }
+      assert(threw, "Should throw with no time data");
+    });
+
+    // ============================================================
+    // Study goal progress
+    // ============================================================
+    group("Study Goal Progress");
+
+    test("0 minutes → 0% progress, not met", () => {
+      const g = new StudyGoal({ id: "g1", studentId: "u1", title: "Test", targetHours: 2 });
+      const r = g.progressToward(0);
+      assertEqual(r.percentage, 0); assert(!r.met);
+    });
+
+    test("Exactly met → 100%, met=true", () => {
+      const g = new StudyGoal({ id: "g1", studentId: "u1", title: "Test", targetHours: 2 });
+      const r = g.progressToward(120);  // 2h * 60 = 120 min
+      assertEqual(r.percentage, 100); assert(r.met);
+    });
+
+    test("Over target → capped at 100%", () => {
+      const g = new StudyGoal({ id: "g1", studentId: "u1", title: "Test", targetHours: 1 });
+      const r = g.progressToward(200); // way over 60 min
+      assertEqual(r.percentage, 100); assert(r.met);
+    });
+
+    test("1h of 4h target = 25%", () => {
+      const g = new StudyGoal({ id: "g1", studentId: "u1", title: "Test", targetHours: 4 });
+      const r = g.progressToward(60);
+      assertEqual(r.percentage, 25); assert(!r.met);
+    });
+
+    test("addHours returns new goal with updated currentHours", () => {
+      const g = new StudyGoal({ id: "g1", studentId: "u1", title: "Test", targetHours: 2 });
+      const g2 = g.addHours(1);
+      assertEqual(g2.currentHours, 1); assertEqual(g.currentHours, 0); // immutable
+    });
+
+    test("addHours sets status to met when target reached", () => {
+      const g = new StudyGoal({ id: "g1", studentId: "u1", title: "Test", targetHours: 1 });
+      const g2 = g.addHours(2);
+      assertEqual(g2.status, "met");
+    });
+
+    // ============================================================
+    // Validation rules
+    // ============================================================
+    group("Validation Rules");
+
+    test("StudyGoal: empty title throws", () => {
+      let threw = false;
+      try { new StudyGoal({ id: "g", studentId: "u", title: "  ", targetHours: 1 }); }
+      catch { threw = true; }
+      assert(threw);
+    });
+
+    test("StudyGoal: negative targetHours throws", () => {
+      let threw = false;
+      try { new StudyGoal({ id: "g", studentId: "u", title: "Valid", targetHours: -1 }); }
+      catch { threw = true; }
+      assert(threw);
+    });
+
+    test("StudyGoal: unknown status throws", () => {
+      let threw = false;
+      try { new StudyGoal({ id: "g", studentId: "u", title: "Valid", targetHours: 1, status: "flying" }); }
+      catch { threw = true; }
+      assert(threw);
+    });
+
+    test("StudyGoal: valid goal does not throw", () => {
+      new StudyGoal({ id: "g", studentId: "u", title: "Study Databases", targetHours: 5 });
+      assert(true);
+    });
+
+    test("Quiz: unknown difficulty throws", () => {
+      let threw = false;
+      try { new Quiz({ id: "q", subjectId: "s", topicId: "t", title: "T", difficulty: "extreme", questions: [] }); }
+      catch { threw = true; }
+      assert(threw);
+    });
+
+    // ============================================================
+    // Performance summary and time formatting (on QuizAttempt)
+    // ============================================================
+    group("Performance Summary & Time Formatting");
+
+    function makeAttempt(percentage, seconds) {
+      return new QuizAttempt({
+        id: "a1", studentId: "u1", quizId: "q1", subjectId: "s1", topicId: "t1",
+        answers: [], score: percentage, total: 100, percentage,
+        timeTakenSeconds: seconds,
+      });
+    }
+
+    test("≥90% → Excellent", () => {
+      assertEqual(makeAttempt(100, 0).performanceSummary(), "Excellent");
+      assertEqual(makeAttempt(90, 0).performanceSummary(), "Excellent");
+    });
+    test("75–89% → Good", () => {
+      assertEqual(makeAttempt(75, 0).performanceSummary(), "Good");
+      assertEqual(makeAttempt(85, 0).performanceSummary(), "Good");
+    });
+    test("60–74% → Satisfactory", () => {
+      assertEqual(makeAttempt(60, 0).performanceSummary(), "Satisfactory");
+    });
+    test("40–59% → Needs improvement", () => {
+      assertEqual(makeAttempt(50, 0).performanceSummary(), "Needs improvement");
+    });
+    test("<40% → Keep practicing", () => {
+      assertEqual(makeAttempt(0, 0).performanceSummary(), "Keep practicing");
+    });
+
+    test("formattedTime: 45s → '45s'", () => {
+      assertEqual(makeAttempt(100, 45).formattedTime(), "45s");
+    });
+    test("formattedTime: 60s → '1m 0s'", () => {
+      assertEqual(makeAttempt(100, 60).formattedTime(), "1m 0s");
+    });
+    test("formattedTime: 150s → '2m 30s'", () => {
+      assertEqual(makeAttempt(100, 150).formattedTime(), "2m 30s");
+    });
+
+    // ============================================================
+    // Render results
+    // ============================================================
+    const container = document.getElementById("results");
+    let lastGroup = "";
+    let passed = 0, failed = 0;
+
+    results.forEach((r) => {
+      if (r.group !== lastGroup) {
+        lastGroup = r.group;
+        const hdr = document.createElement("div");
+        hdr.className = "group-header";
+        hdr.textContent = r.group;
+        container.appendChild(hdr);
+      }
+      const div = document.createElement("div");
+      div.className = `test-result test-result--${r.ok ? "pass" : "fail"}`;
+      div.innerHTML = `
+        <span class="test-result__icon">${r.ok ? "✓" : "✗"}</span>
+        <div>
+          <div>${r.name}</div>
+          ${r.error ? `<div class="test-result__error">→ ${r.error}</div>` : ""}
+        </div>`;
+      container.appendChild(div);
+      r.ok ? passed++ : failed++;
+    });
+
+    const sum = document.createElement("div");
+    sum.className = `summary ${failed === 0 ? "summary--all-pass" : "summary--some-fail"}`;
+    sum.textContent = `${passed} passed, ${failed} failed out of ${passed + failed} tests.`;
+    container.appendChild(sum);
+  </script>
+</body>
+</html>

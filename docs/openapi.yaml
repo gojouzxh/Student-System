@@ -1,0 +1,722 @@
+openapi: 3.1.0
+info:
+  title: Quiz & Study Tracker API
+  version: 1.0.0
+  x-legacy-description: >
+    Versioned JSON API for student accounts. Authentication uses the secure
+    cookie session described by the cookieAuth scheme.
+    to the authenticated student. Send the QSP_API_TOKEN configured by the
+    server as a Bearer token. The token is a demo access gate, not a user
+    account/password system or     production identity provider. Validation errors use HTTP 400, invalid quiz
+    answer references use 422, missing resources use 404, unsupported methods
+    use 405, oversized request bodies use 413, storage and unexpected failures
+    use 500, downstream service failures use 503, and stalled request bodies
+    use 504. Error responses use the ErrorEnvelope schema and never include
+    stack traces.
+  description: >
+    Versioned API for student accounts. Authentication uses the opaque,
+    HttpOnly session cookie set at login. Passwords are stored as salted
+    scrypt hashes; error responses never include stack traces.
+servers:
+  - url: http://localhost:8080/api/v1
+security:
+  - cookieAuth: []
+tags:
+  - name: System
+  - name: Authentication
+  - name: Students
+  - name: Subjects
+  - name: Quizzes
+  - name: Study
+paths:
+  /auth/register:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Create a student account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: Account created; password hash is never returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthUserEnvelope" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /auth/login:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Sign in and create a protected session
+      description: Sets an HttpOnly, SameSite=Strict session cookie. The raw session token is never returned in the JSON body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSessionEnvelope" }
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: HttpOnly session cookie; Secure is enabled in production.
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /auth/session:
+    get:
+      tags: [Authentication]
+      security:
+        - cookieAuth: []
+      summary: Get the current session
+      responses:
+        "200":
+          description: Current student profile and session expiry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSessionEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: End the current session
+      responses:
+        "200": { description: Session invalidated and cookie cleared. }
+  /auth/forgot-password:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Request password reset instructions
+      description: Always returns the same success message for existing and unknown emails. Requires server-side Resend email configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetEmailRequest" }
+      responses:
+        "202": { description: Reset instructions will be sent if the address matches an account. }
+        "400": { $ref: "#/components/responses/Validation" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /auth/reset-password:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Replace a password using a one-time reset token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        "200": { description: Password changed; all sessions for the account are invalidated. }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /health:
+    get:
+      tags: [System]
+      security: []
+      summary: Check API liveness
+      responses:
+        "200":
+          description: API process is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, apiVersion]
+                properties:
+                  status: { type: string, const: ok }
+                  service: { type: string }
+                  apiVersion: { type: string }
+  /students/me:
+    get:
+      tags: [Students]
+      summary: Get the authenticated demo student
+      responses:
+        "200":
+          description: Student profile (never includes credentials).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StudentEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /students/me/progress:
+    get:
+      tags: [Students]
+      summary: Get quiz, study, subject, and topic progress for the student
+      responses:
+        "200":
+          description: Progress dossier aggregated from recorded quiz attempts and study activity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProgressEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /subjects:
+    get:
+      tags: [Subjects]
+      summary: List available subjects
+      responses:
+        "200":
+          description: Subject collection.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubjectCollection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /subjects/{subjectId}/topics:
+    parameters:
+      - $ref: "#/components/parameters/SubjectId"
+    get:
+      tags: [Subjects]
+      summary: List topics belonging to a subject
+      responses:
+        "200":
+          description: Topic collection.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicCollection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /quizzes:
+    get:
+      tags: [Quizzes]
+      summary: List quizzes without exposing answer keys
+      responses:
+        "200":
+          description: Quiz collection; question choices omit correct answer IDs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuizCollection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /quizzes/{quizId}:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+    get:
+      tags: [Quizzes]
+      summary: Get one quiz without exposing its answer key
+      responses:
+        "200":
+          description: Quiz with questions and choices, but no correctChoiceId or explanations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuizEnvelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /quizzes/{quizId}/attempts:
+    parameters:
+      - $ref: "#/components/parameters/QuizId"
+    post:
+      tags: [Quizzes]
+      summary: Submit and grade a quiz attempt
+      description: >
+        Answers map question IDs to choice IDs. Unanswered questions may be
+        omitted. The server verifies the authenticated student, question
+        membership, and choice membership before saving the attempt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuizAttemptRequest"
+      responses:
+        "201":
+          description: Saved, graded attempt and refreshed progress dossier.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuizAttemptEnvelope" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/InvalidSubmission" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "504": { $ref: "#/components/responses/Timeout" }
+  /quiz-attempts:
+    get:
+      tags: [Quizzes]
+      summary: List quiz attempts for the authenticated student
+      responses:
+        "200":
+          description: Attempts ordered newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuizAttemptCollection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /study-sessions:
+    get:
+      tags: [Study]
+      summary: List study sessions for the authenticated student
+      responses:
+        "200":
+          description: Sessions ordered newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StudySessionCollection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      tags: [Study]
+      summary: Record a study session and update streak and goal progress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StudySessionRequest" }
+      responses:
+        "201":
+          description: Saved session and refreshed progress dossier.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StudySessionEnvelope" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "504": { $ref: "#/components/responses/Timeout" }
+  /goals:
+    get:
+      tags: [Study]
+      summary: List study goals and their progress
+      responses:
+        "200":
+          description: Student goals, including progress percentage and completion state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoalCollection" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      tags: [Study]
+      summary: Create a study goal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateGoalRequest" }
+      responses:
+        "201":
+          description: Created goal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoalEnvelope" }
+        "400": { $ref: "#/components/responses/Validation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+  /goals/{goalId}:
+    parameters:
+      - $ref: "#/components/parameters/GoalId"
+    delete:
+      tags: [Study]
+      summary: Delete a goal owned by the authenticated student
+      responses:
+        "204": { description: Goal deleted. No response body. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: qsp_session
+      description: Opaque HttpOnly session cookie set by POST /auth/login.
+  parameters:
+    SubjectId:
+      name: subjectId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    QuizId:
+      name: quizId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    GoalId:
+      name: goalId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [name, username, email, password, confirmPassword, acceptTerms]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100 }
+        username: { type: string, minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" }
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 12, maxLength: 128 }
+        confirmPassword: { type: string, minLength: 12, maxLength: 128 }
+        acceptTerms: { type: boolean, const: true }
+    LoginRequest:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier: { type: string, minLength: 1, maxLength: 254, description: Username or email. }
+        password: { type: string, minLength: 1, maxLength: 128 }
+        rememberMe: { type: boolean, default: false }
+    ResetEmailRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+    ResetPasswordRequest:
+      type: object
+      required: [token, password, confirmPassword]
+      properties:
+        token: { type: string, minLength: 32, maxLength: 128 }
+        password: { type: string, minLength: 12, maxLength: 128 }
+        confirmPassword: { type: string, minLength: 12, maxLength: 128 }
+    AuthSessionEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [user, expiresAt, rememberMe]
+          properties:
+            user:
+              type: object
+              required: [id, name, username, email, role]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                username: { type: string }
+                email: { type: string, format: email }
+                role: { type: string, const: student }
+            expiresAt: { type: integer, description: Unix timestamp in milliseconds. }
+            rememberMe: { type: boolean }
+    AuthUserEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [user]
+          properties:
+            user:
+              type: object
+              required: [id, name, username, email, role]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                username: { type: string }
+                email: { type: string, format: email }
+                role: { type: string, const: student }
+    Subject:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+    Topic:
+      type: object
+      required: [id, subjectId, name]
+      properties:
+        id: { type: string }
+        subjectId: { type: string }
+        name: { type: string }
+        description: { type: string }
+    TopicCollection:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Topic" } }
+    Choice:
+      type: object
+      required: [id, text]
+      properties:
+        id: { type: string }
+        text: { type: string }
+    QuizQuestion:
+      type: object
+      required: [id, topicId, prompt, choices]
+      properties:
+        id: { type: string }
+        topicId: { type: string }
+        prompt: { type: string }
+        choices: { type: array, items: { $ref: "#/components/schemas/Choice" } }
+    Quiz:
+      type: object
+      required: [id, subjectId, topicId, title, questions]
+      properties:
+        id: { type: string }
+        subjectId: { type: string }
+        topicId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        difficulty: { type: string, enum: [easy, medium, hard] }
+        timeLimitSeconds: { type: integer, minimum: 0 }
+        questions: { type: array, items: { $ref: "#/components/schemas/QuizQuestion" } }
+    QuizAttempt:
+      type: object
+      required: [id, studentId, quizId, answers, score, total, percentage, timeTakenSeconds, takenAt]
+      properties:
+        id: { type: string }
+        studentId: { type: string }
+        quizId: { type: string }
+        subjectId: { type: string }
+        topicId: { type: string }
+        answers: { type: array, items: { type: object } }
+        score: { type: integer }
+        total: { type: integer }
+        percentage: { type: number }
+        timeTakenSeconds: { type: number }
+        takenAt: { type: string, format: date-time }
+    QuizEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Quiz" }
+    QuizCollection:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Quiz" } }
+    QuizAttemptCollection:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/QuizAttempt" } }
+    QuizAttemptRequest:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: object
+          additionalProperties:
+            type: [string, "null"]
+          description: Map from question ID to selected choice ID; omit unanswered questions.
+        timeTakenSeconds:
+          type: number
+          minimum: 0
+          default: 0
+    QuizAttemptEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [attempt, breakdown, progress]
+          properties:
+            attempt: { $ref: "#/components/schemas/QuizAttempt" }
+            breakdown: { type: array, items: { type: object } }
+            progress: { $ref: "#/components/schemas/ProgressEnvelope/properties/data" }
+    StudySession:
+      type: object
+      required: [id, studentId, subjectId, minutes, date]
+      properties:
+        id: { type: string }
+        studentId: { type: string }
+        subjectId: { type: string }
+        topicId: { type: [string, "null"] }
+        minutes: { type: integer, minimum: 1 }
+        notes: { type: string }
+        date: { type: string, format: date-time }
+    StudySessionRequest:
+      type: object
+      required: [subjectId]
+      properties:
+        subjectId: { type: string }
+        topicId: { type: [string, "null"] }
+        minutes: { type: number, exclusiveMinimum: 0 }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        date: { type: string, format: date-time }
+        notes: { type: string, maxLength: 2000 }
+      description: Supply either positive minutes or both startTime and endTime.
+    StudySessionEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [session, progress]
+          properties:
+            session: { $ref: "#/components/schemas/StudySession" }
+            progress: { $ref: "#/components/schemas/ProgressEnvelope/properties/data" }
+    StudySessionCollection:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/StudySession" } }
+    SubjectCollection:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Subject" } }
+    CreateGoalRequest:
+      type: object
+      required: [title, targetHours]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120 }
+        subjectId: { type: [string, "null"] }
+        targetHours: { type: number, exclusiveMinimum: 0 }
+        targetDate: { type: [string, "null"], format: date }
+    GoalEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, studentId, title, targetHours, currentHours, status]
+          properties:
+            id: { type: string }
+            studentId: { type: string }
+            title: { type: string }
+            subjectId: { type: [string, "null"] }
+            targetHours: { type: number }
+            currentHours: { type: number }
+            status: { type: string, enum: [active, met, missed] }
+    GoalCollection:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/GoalEnvelope/properties/data"
+              - type: object
+                properties:
+                  progress:
+                    type: object
+                    required: [actualMinutes, targetMinutes, percentage, met]
+                    properties:
+                      actualMinutes: { type: number }
+                      targetMinutes: { type: number }
+                      percentage: { type: number, minimum: 0, maximum: 100 }
+                      met: { type: boolean }
+    StudentEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            email: { type: string, format: email }
+            role: { type: string }
+            currentStreak: { type: integer }
+            longestStreak: { type: integer }
+    CollectionEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, items: { type: object } }
+    ProgressEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [studentId, quizPerformance, studyPerformance, subjectPerformance, topicsToReview]
+          properties:
+            studentId: { type: string }
+            quizPerformance:
+              type: object
+              properties:
+                averageScore: { type: number }
+                highestScore: { type: number }
+                lowestScore: { type: number }
+                totalQuizzes: { type: integer }
+                correctAnswers: { type: integer }
+                incorrectAnswers: { type: integer }
+            studyPerformance:
+              type: object
+              properties:
+                totalStudyTime: { type: number }
+                dailyStudyTime: { type: number }
+                weeklyStudyTime: { type: number }
+                monthlyStudyTime: { type: number }
+                studyStreak: { type: integer }
+                goalCompletion: { type: object }
+            subjectPerformance: { type: array, items: { type: object } }
+            topicsToReview: { type: array, items: { type: object } }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, statusCode]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            statusCode: { type: integer }
+            details: { type: [object, "null"] }
+  responses:
+    Validation:
+      description: Invalid JSON or input did not pass validation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Unauthorized:
+      description: Missing, invalid, or expired session.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Conflict:
+      description: Username or email is already registered.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotFound:
+      description: Resource or endpoint was not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    InvalidSubmission:
+      description: The quiz answer map contains a question or choice outside the quiz.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    PayloadTooLarge:
+      description: JSON body exceeds the 64 KiB limit.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    InternalError:
+      description: Storage or unexpected internal error. Stack traces are never returned.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Timeout:
+      description: Request body or upstream operation timed out.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    RateLimited:
+      description: Authentication request limit reached; retry after the indicated delay.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    ServiceUnavailable:
+      description: Email delivery is not configured or is temporarily unavailable.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }

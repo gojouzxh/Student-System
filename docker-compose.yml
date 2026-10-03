@@ -1,0 +1,21 @@
+services:
+  quiz-study-tracker:
+    build:
+      context: .
+    image: quiz-study-tracker:local
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      QSP_DATA_DIR: /app/data
+      QSP_COOKIE_SECURE: "${QSP_COOKIE_SECURE:-false}"
+      QSP_ALLOWED_ORIGINS: "${QSP_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}"
+      QSP_PUBLIC_URL: "${QSP_PUBLIC_URL:-http://localhost:8080}"
+      QSP_EMAIL_API_KEY: "${QSP_EMAIL_API_KEY:-}"
+      QSP_EMAIL_FROM: "${QSP_EMAIL_FROM:-}"
+    volumes:
+      - quiz-study-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  quiz-study-data:

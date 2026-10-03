@@ -1,0 +1,67 @@
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Run tests
+        run: npm test
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build static frontend
+        env:
+          QSP_API_URL: ${{ vars.QSP_API_URL }}
+        run: |
+          if [ -z "$QSP_API_URL" ]; then
+            echo "Repository variable QSP_API_URL must be set to the deployed backend origin." >&2
+            exit 1
+          fi
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const apiUrl = new URL(process.env.QSP_API_URL);
+            if (apiUrl.protocol !== "https:" || apiUrl.pathname !== "/" || apiUrl.search || apiUrl.hash) {
+              throw new Error("QSP_API_URL must be an HTTPS backend origin without a path.");
+            }
+            fs.mkdirSync("dist", { recursive: true });
+            fs.cpSync("index.html", "dist/index.html");
+            fs.cpSync("css", "dist/css", { recursive: true });
+            fs.cpSync("js", "dist/js", { recursive: true });
+            fs.writeFileSync("dist/js/config.js",
+              `globalThis.QSP_CONFIG = Object.freeze({ apiBaseUrl: ${JSON.stringify(apiUrl.origin)} });\n`);
+          '
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

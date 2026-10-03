@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: coursework-api
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    disk:
+      name: coursework-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: QSP_DATA_DIR
+        value: /var/data
+      - key: QSP_COOKIE_SECURE
+        value: "true"
+      - key: QSP_ALLOWED_ORIGINS
+        value: https://gojouzxh.github.io,http://localhost:8080,http://127.0.0.1:8080
+      - key: QSP_PUBLIC_URL
+        value: https://gojouzxh.github.io/Student-System/
+      - key: QSP_EMAIL_API_KEY
+        sync: false
+      - key: QSP_EMAIL_FROM
+        sync: false

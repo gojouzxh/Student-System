@@ -17,16 +17,18 @@ import { AuthService } from "./AuthService.js";
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export function createPlatform({ dataDirectory, authOptions = {} }) {
-  const repositories = {
-    students: new JsonFileRepository(dataDirectory, "students", Student.fromJSON),
-    subjects: new JsonFileRepository(dataDirectory, "subjects", Subject.fromJSON),
-    topics: new JsonFileRepository(dataDirectory, "topics", Topic.fromJSON),
-    quizzes: new JsonFileRepository(dataDirectory, "quizzes", Quiz.fromJSON),
-    attempts: new JsonFileRepository(dataDirectory, "attempts", QuizAttempt.fromJSON),
-    sessions: new JsonFileRepository(dataDirectory, "sessions", StudySession.fromJSON),
-    goals: new JsonFileRepository(dataDirectory, "goals", StudyGoal.fromJSON),
-  };
+   export function createPlatform({ dataDirectory, authOptions = {}, repositoryFactory = null }) {
+     const make = repositoryFactory
+       || ((name, factory) => new JsonFileRepository(dataDirectory, name, factory));
+     const repositories = {
+       students: make("students", Student.fromJSON),
+       subjects: make("subjects", Subject.fromJSON),
+       topics: make("topics", Topic.fromJSON),
+       quizzes: make("quizzes", Quiz.fromJSON),
+       attempts: make("attempts", QuizAttempt.fromJSON),
+       sessions: make("sessions", StudySession.fromJSON),
+       goals: make("goals", StudyGoal.fromJSON),
+     };
 
   if (repositories.students.isEmpty()) {
     seedIfEmpty({

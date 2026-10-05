@@ -1,3 +1,4 @@
+import { createPool, ensureSchema, loadSnapshot, PostgresRepository } from "./PostgresRepository.js";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -499,27 +500,60 @@ export function createServer({
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const port = Number(process.env.PORT || 8080);
-  const dataDirectory = process.env.QSP_DATA_DIR || path.join(PROJECT_ROOT, "data");
+   async function startServer() {
+     const port = Number(process.env.PORT || 8080);
+     const dataDirectory = process.env.QSP_DATA_DIR || path.join(PROJECT_ROOT, "data");
 
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    console.error("PORT must be an integer between 1 and 65535.");
-    process.exitCode = 1;
-  } else {
-    try {
-      const { services } = createPlatform({ dataDirectory });
-      const server = createServer({ services });
-      server.listen(port, "0.0.0.0", () => {
-        console.info(`Quiz & Study Tracker listening on port ${port}.`);
-      });
-      server.on("error", (error) => {
-        console.error("[Server] Failed to listen:", error.message);
-        process.exitCode = 1;
-      });
-    } catch (error) {
-      console.error("[Server] Startup failed:", error.message);
-      process.exitCode = 1;
-    }
-  }
-}
+     if (!Number.isInteger(port) || port < 1 || port > 65535) {
+       console.error("PORT must be an integer between 1 and 65535.");
+       process.exitCode = 1;
+       return;
+     }
+
+     let pool = null;
+     const repositories = [];
+     let platformOptions = { dataDirectory };
+
+     if (process.env.DATABASE_URL) {
+       pool = createPool(process.env.DATABASE_URL);
+       await ensureSchema(pool);
+       const snapshot = await loadSnapshot(pool);
+       platformOptions = {
+         dataDirectory,
+         repositoryFactory: (name, factory) => {
+           const repository = new PostgresRepository(pool, name, factory, snapshot.get(name) ?? new Map());
+           repositories.push(repository);
+           return repository;
+         },
+       };
+       console.info("Using Postgres storage.");
+     } else {
+       console.info(`Using JSON file storage in ${dataDirectory}.`);
+     }
+
+     const { services } = createPlatform(platformOptions);
+     const server = createServer({ services });
+     server.listen(port, "0.0.0.0", () => {
+       console.info(`Quiz & Study Tracker listening on port ${port}.`);
+     });
+     server.on("error", (error) => {
+       console.error("[Server] Failed to listen:", error.message);
+       process.exitCode = 1;
+     });
+
+     const shutdown = async () => {
+       server.close();
+       await Promise.all(repositories.map((repository) => repository.flush()));
+       if (pool) await pool.end();
+       process.exit(0);
+     };
+     process.once("SIGTERM", shutdown);
+     process.once("SIGINT", shutdown);
+   }
+
+   if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+     startServer().catch((error) => {
+       console.error("[Server] Startup failed:", error.message);
+       process.exitCode = 1;
+     });
+   }

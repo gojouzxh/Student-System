@@ -155,6 +155,7 @@ export class AuthService {
     this.#loginAttempts.delete(address);
     const token = crypto.randomBytes(32).toString("base64url");
     const now = this.#clock();
+    this.#userService.saveStudent(new Student({ ...student.toJSON(), lastLoginAt: new Date(now).toISOString() }));
     const idleDurationMs = rememberMe ? REMEMBERED_IDLE_MS : SESSION_IDLE_MS;
     const session = {
       userId: student.id,

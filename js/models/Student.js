@@ -10,15 +10,17 @@ export class Student extends User {
   #currentStreak;
   #longestStreak;
   #lastStudyDate;
+  #lastLoginAt;
 
   constructor({ id, name, username = null, email, passwordHash, isActive = true, gradeLevel = null, program = null,
-                currentStreak = 0, longestStreak = 0, lastStudyDate = null, createdAt }) {
+                currentStreak = 0, longestStreak = 0, lastStudyDate = null, lastLoginAt = null, createdAt }) {
     super({ id, name, username, email, passwordHash, role: "student", isActive, createdAt });
     this.#gradeLevel = gradeLevel;
     this.#program = program;
     this.#currentStreak = currentStreak;
     this.#longestStreak = longestStreak;
     this.#lastStudyDate = lastStudyDate;
+    this.#lastLoginAt = lastLoginAt;
   }
 
   get gradeLevel() { return this.#gradeLevel; }
@@ -49,6 +51,7 @@ export class Student extends User {
       currentStreak: this.#currentStreak,
       longestStreak: this.#longestStreak,
       lastStudyDate: this.#lastStudyDate,
+      lastLoginAt: this.#lastLoginAt,
     };
   }
 

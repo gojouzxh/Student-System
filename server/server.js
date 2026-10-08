@@ -415,8 +415,9 @@ async function serveStatic(request, response, pathname, staticRoot) {
   }
 
   const segments = pathSegments(pathname);
-  if (segments.some((segment) => !segment || segment.startsWith(".") ||
-      segment === "server" || segment === "node_modules" || segment === "data" || segment.includes("\\"))) {
+    if (segments.some((segment) => !segment || segment.startsWith(".") ||
+      segment === "server" || segment === "node_modules" || segment.includes("\\")) ||
+      segments[0] === "data") {
     throw new NotFoundError("File");
   }
   const relativePath = segments.length === 0 ? "index.html" : segments.join(path.sep);
